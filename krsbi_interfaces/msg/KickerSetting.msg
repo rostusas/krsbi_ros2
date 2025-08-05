@@ -1,0 +1,2 @@
+int64 charge_time
+bool action
