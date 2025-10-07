@@ -73,7 +73,7 @@ class RobotMovementAutoNode(Node):
         # Publisher
         self.pubPWM = self.create_publisher(Wheel, 'Wheel', 10)
         self.pubGripper = self.create_publisher(DribbleModule, 'DribbleModule', 10)
-        self.pubBallPosition = self.create_publisher(BallPositionBasedOnCamera, '/rosserial/BallPositionBasedOnCamera', 10)
+        self.pubBallPosition = self.create_publisher(BallPositionBasedOnCamera, '/BallPositionBasedOnCamera', 10)
         self.pubKickerModule = self.create_publisher(KickerModule, 'KickerModule', 10)
 
         # Subscriber
@@ -81,7 +81,7 @@ class RobotMovementAutoNode(Node):
         self.create_subscription(Coordinate, '/ui/Coordinate', self.coordinateCallback, 10)
         self.create_subscription(Float32, '/rosserial/BNO', self.headingCallback, 10)
         self.create_subscription(Float32, 'HeadingSetPoint', self.headingSetPointCallback, 10)
-        self.create_subscription(RobotMode, '/ui/RobotMode', self.robotModeCallback, 10)
+        self.create_subscription(RobotMode, 'RobotMode', self.robotModeCallback, 10)
         self.create_subscription(PoseArray, '/yolov5/ball', self.ballCoordinateCallback, 10)
 
         self.wheel = Wheel()
@@ -453,12 +453,15 @@ class RobotMovementAutoNode(Node):
         return sudutSetPoint - sudut
 
     def catchBall(self):
+        self.get_logger().info("Masuk Sini")
+
         errorJarak = BALL_SET_POINT["distance"] - self.ballDistance
         errorSudut = self.errorDirection(BALL_SET_POINT["angle"], self.ballDirection)
         if -self.batas < errorJarak < self.batas and -self.batas < errorSudut < self.batas:
             return True
         else:
             return False
+
     
     def catchBall2(self):
         error_jarak = BALL_SET_POINT["distance"] - self.ballDistance

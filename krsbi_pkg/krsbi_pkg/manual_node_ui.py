@@ -26,7 +26,7 @@ class ManualUINode(Node):
         self.pubDribbleSetting = self.create_publisher(DribbleSetting, '/ui/DribbleSetting', 10)
         self.pubRobotStatus = self.create_publisher(RobotStatus, '/ui/RobotStatus', 10)
         self.pubNavigationSetting = self.create_publisher(NavigationSetting, '/ui/NavigationSetting', 10)
-        self.pubKickerModule = self.create_publisher(KickerModule, '/ui/KickerModule', 10)
+        self.pubKickerModule = self.create_publisher(KickerModule, 'KickerModule', 10)
 
         # State tracking
         self.charge_counter = 0

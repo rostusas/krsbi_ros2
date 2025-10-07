@@ -22,7 +22,7 @@ class AutoUINode(Node):
         
         # Publisher
         self.pubCoordinate = self.create_publisher(Coordinate, '/ui/Coordinate', 10)
-        self.pubRobotMode = self.create_publisher(RobotMode, '/ui/RobotMode', 10)
+        self.pubRobotMode = self.create_publisher(RobotMode, 'RobotMode', 10)
 
         self.setupTimers()
         self.customSetupCode()
