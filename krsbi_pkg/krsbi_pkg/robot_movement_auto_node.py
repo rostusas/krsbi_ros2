@@ -6,7 +6,7 @@ import rclpy
 import numpy as np
 from rclpy.node import Node
 from geometry_msgs.msg import PoseArray
-from std_msgs.msg import Float32, String
+from std_msgs.msg import Float32, Float32MultiArray
 from krsbi_pkg.constants import CAMERA_MIDDLE_POINT, BALL_SET_POINT
 from krsbi_interfaces.msg import Wheel, DribbleModule, NavigationSetting, RobotStatus, Coordinate, RobotMode, SetPoint, BallPositionBasedOnCamera, RealSenseT265, KickerModule
 
@@ -73,8 +73,9 @@ class RobotMovementAutoNode(Node):
         # Publisher
         self.pubPWM = self.create_publisher(Wheel, 'Wheel', 10)
         self.pubGripper = self.create_publisher(DribbleModule, 'DribbleModule', 10)
-        self.pubBallPosition = self.create_publisher(BallPositionBasedOnCamera, '/BallPositionBasedOnCamera', 10)
+        self.pubBallPosition = self.create_publisher(BallPositionBasedOnCamera, 'BallPositionBasedOnCamera', 10)
         self.pubKickerModule = self.create_publisher(KickerModule, 'KickerModule', 10)
+        self.pubPIDParams = self.create_publisher(Float32MultiArray, 'pidParams', 10)
 
         # Subscriber
         self.create_subscription(RealSenseT265, '/t265/Odometry', self.realSenseT265Callback, 10)
@@ -116,14 +117,19 @@ class RobotMovementAutoNode(Node):
         self.mode = RobotMode()
         self.dataBola = BallPositionBasedOnCamera()
         self.kickerModule = KickerModule()
-        
 
-        self.pidSpeed = PID(5, 0, 0, 0.1)
+        self.pidBall = Float32MultiArray()
+        self.pidBall.data = [
+            15.0, 0.1, 0.0,   #PID Ax
+            6.0, 0.2, 0.0,    #PID Ay
+            15.0, 0.1, 0.0    #PID W
+        ]
+        self.sendPID = False
+        self.pubPIDParams.publish(self.pidBall)
+        
         self.pidAx = PID(8, 0, 0, 0.1)
         self.pidAy = PID(8, 0, 0, 0.1)
         self.pidW = PID(13, 0, 0, 0.1)
-        self.pidAxBall = PID(5, 0, 0, 0.1)
-        self.pidWBall = PID(10, 0, 0, 0.1)
 
         self.positionSetPoint = 0
         self.angleSetPoint = 0
@@ -453,7 +459,9 @@ class RobotMovementAutoNode(Node):
         return sudutSetPoint - sudut
 
     def catchBall(self):
-        self.get_logger().info("Masuk Sini")
+        if self.sendPID == False:
+            self.pubPIDParams.publish(self.pidBall)
+            self.sendPID = True
 
         errorJarak = BALL_SET_POINT["distance"] - self.ballDistance
         errorSudut = self.errorDirection(BALL_SET_POINT["angle"], self.ballDirection)
@@ -464,6 +472,10 @@ class RobotMovementAutoNode(Node):
 
     
     def catchBall2(self):
+        if self.sendPID == False:
+            self.pubPIDParams.publish(self.pidBall)
+            self.sendPID = True
+
         error_jarak = BALL_SET_POINT["distance"] - self.ballDistance
         error_sudut = BALL_SET_POINT["angle"] - self.ballDirection
         if -self.batas < error_jarak < self.batas and -self.batas < error_sudut < self.batas:
@@ -652,11 +664,13 @@ class RobotMovementAutoNode(Node):
             state = self.catchBall()
             if state:
                 self.robotMode = "nothing"
+                self.sendPID = False
 
         if self.robotMode == "catchBall2":
             state = self.catchBall2()
             if state:
                 self.robotMode = "nothing"
+                self.sendPID = False
 
         if self.robotMode == "passing":
             self.shortPass()
