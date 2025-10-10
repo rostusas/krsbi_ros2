@@ -76,6 +76,7 @@ class RobotMovementAutoNode(Node):
         self.pubBallPosition = self.create_publisher(BallPositionBasedOnCamera, 'BallPositionBasedOnCamera', 10)
         self.pubKickerModule = self.create_publisher(KickerModule, 'KickerModule', 10)
         self.pubPIDParams = self.create_publisher(Float32MultiArray, 'pidParams', 10)
+        self.pubRobotMode = self.create_publisher(RobotMode, 'RobotMode', 10)
 
         # Subscriber
         self.create_subscription(RealSenseT265, '/t265/Odometry', self.realSenseT265Callback, 10)
@@ -164,7 +165,8 @@ class RobotMovementAutoNode(Node):
         self.ballCoordinateY = 0
         self.xBolaReal = 0
         self.yBolaReal = 0
-        self.ballDistance = 0
+        self.ballDistance = 15
+        self.ballDirection = 85
         self.step = 0
         self.stepTarget = 0
 
@@ -229,15 +231,15 @@ class RobotMovementAutoNode(Node):
         deltax = -math.cos(math.radians(sudut)) * r2
         deltay = math.sin(math.radians(sudut)) * r2
 
-        self.xbola_real = deltax + b
-        self.ybola_real = deltay + a
+        self.xBolaReal = deltax + b
+        self.yBolaReal = deltay + a
         self.ballDistance = r2
         self.ballDirection = sudut
 
         self.dataBola.angle = int(sudut)
         self.dataBola.distance = int(r2)
-        self.dataBola.x_real = int(self.xbola_real)
-        self.dataBola.y_real = int(self.ybola_real)
+        self.dataBola.x_real = int(self.xBolaReal)
+        self.dataBola.y_real = int(self.yBolaReal)
         self.dataBola.x_on_camera = int(self.ballCoordinateX)
         self.dataBola.y_on_camera = int(self.ballCoordinateY)
         self.dataBola.position_set_point = BALL_SET_POINT["distance"]
@@ -360,10 +362,10 @@ class RobotMovementAutoNode(Node):
     
     def controlOutputRobotDirection(self, coordinateX, coordinateY) :
         robotTargetDirection = self.robotDirection(coordinateX, coordinateY, self.realSenseT265.x, self.realSenseT265.y)
-        self.error_heading = self.calculateHeadingError(self.heading, robotTargetDirection) # Robot jalan sambil mengoreksi arah menuju titik target (robot menyesuaikan arah ke titik target)
+        self.errorHeading = self.calculateHeadingError(self.heading, robotTargetDirection) # Robot jalan sambil mengoreksi arah menuju titik target (robot menyesuaikan arah ke titik target)
         ax = 0
         ay = 0
-        w = (self.pidW(self.error_heading))
+        w = (self.pidW(self.errorHeading))
         w = self.remap(w, 0, 1000, 0, 1)
 
         min_speed_w = 0.15
@@ -382,16 +384,16 @@ class RobotMovementAutoNode(Node):
         # print(f"robotTargetDirection = {robotTargetDirection}\nheading = {self.heading}\nerror heading = {self.error_heading}\nw = {w}")
         
         self.wheel_kinematics(ax, ay, w)
-        if -2 < self.error_heading < 2:
+        if -2 < self.errorHeading < 2:
             self.wheel_kinematics(0, 0, 0)
 
     def controlOutputGoToCoordinate(self, coordinateX, coordinateY):
-        error_x, error_y = self.calculateErrorAxAy(self.realSenseT265.x, self.realSenseT265.y, coordinateX, coordinateY)
-        error_heading = self.calculateHeadingError(self.heading, self.headingSetPoint)   # Robot terus menghadap set point
+        self.errorX, self.errorY = self.calculateErrorAxAy(self.realSenseT265.x, self.realSenseT265.y, coordinateX, coordinateY)
+        self.errorHeading = self.calculateHeadingError(self.heading, self.headingSetPoint)   # Robot terus menghadap set point
 
-        ax = (self.pidAx(error_x))
-        ay = -(self.pidAy(error_y))
-        w = (self.pidW(error_heading))
+        ax = (self.pidAx(self.errorX))
+        ay = -(self.pidAy(self.errorY))
+        w = (self.pidW(self.errorHeading))
 
         # Remap
         ax = self.remap(ax, 0, 1000, 0, 1)
@@ -446,11 +448,7 @@ class RobotMovementAutoNode(Node):
         #     w = 0
             
         # print(f"+ ax\t: {ax}\n+ ay\t: {ay}\n+ w\t: {w}")
-        
-        self.errorX = error_x
-        self.errorY = error_y
-        # self.error_heading = error_heading
-    
+            
         self.wheel_kinematics(ax, ay, w)
 
     def errorDirection(self, sudutSetPoint, sudut) :
@@ -458,20 +456,27 @@ class RobotMovementAutoNode(Node):
         elif (sudut - sudutSetPoint > 180): sudut -= 360
         return sudutSetPoint - sudut
 
-    def catchBall(self):
+    def catchBall(self, status):
+        self.mode.mode = status
+        self.pubRobotMode.publish(self.mode)
+
         if self.sendPID == False:
             self.pubPIDParams.publish(self.pidBall)
             self.sendPID = True
 
         errorJarak = BALL_SET_POINT["distance"] - self.ballDistance
         errorSudut = self.errorDirection(BALL_SET_POINT["angle"], self.ballDirection)
+        self.get_logger().info(f"Error Jarak: {errorJarak}")
+        self.get_logger().info(f"Error Sudut: {errorSudut}")
         if -self.batas < errorJarak < self.batas and -self.batas < errorSudut < self.batas:
             return True
         else:
             return False
 
-    
-    def catchBall2(self):
+    def catchBall2(self, status):
+        self.mode.mode = status
+        self.pubRobotMode.publish(self.mode)
+
         if self.sendPID == False:
             self.pubPIDParams.publish(self.pidBall)
             self.sendPID = True
@@ -528,7 +533,7 @@ class RobotMovementAutoNode(Node):
 
     def shooting(self):
         if self.shootingActive or self.kickerStatus != "idle":
-            # self.get_logger().info("Short pass sedang aktif atau kicker belum siap.")
+            # self.get_logger().info("Shooting sedang aktif atau kicker belum siap.")
             return
 
         self.get_logger().info("Memulai shooting...")
@@ -632,6 +637,239 @@ class RobotMovementAutoNode(Node):
                 self.pubKickerModule.publish(self.kickerModule)
                 self.robotMode = "nothing"
 
+    def scenario1(self):
+        CHARGE_TIME = 5.0
+        KICK_TIME = 0.5
+        COOLDOWN_TIME = 5.0
+        
+        if not hasattr(self, "kick_state"):
+            self.kick_state = "idle"
+            self.kick_start_time = time.time()
+
+        self.get_logger().info(self.kick_state)
+
+        if self.flag == 0:
+            # ---- SUBPROSES 0: ke titik A (0,130)
+            if self.subProses == 0:
+                x, y = 0, 130
+                self.controlOutputGoToCoordinate(x, y)
+                self.get_logger().info(f"Menuju Koordinat A: x={x}, y={y}")
+                
+                elapsed = time.time() - self.kick_start_time
+                # Saat mulai ke titik A, mulai charge
+                if self.kick_state == "idle":
+                    self.kick_state = "charging"
+                    self.kickerModule.status = "charging"
+                    self.pubKickerModule.publish(self.kickerModule)
+                    self.kick_start_time = time.time()
+                    self.get_logger().info("Mulai charging sambil bergerak")
+
+                elif elapsed >= CHARGE_TIME:
+                    self.kick_state = "waiting"
+                    self.kickerModule.status = "waiting"
+                    self.pubKickerModule.publish(self.kickerModule)
+
+                # Cek apakah sudah sampai titik A
+                if -self.batas <= self.errorX <= self.batas and -self.batas <= self.errorY <= self.batas:
+                    self.get_logger().info("Sudah sampai koordinat A")
+
+                    # Jika sudah charge >=5 detik → kick
+                    if elapsed >= CHARGE_TIME and (self.kick_state == "charging" or self.kick_state == "waiting"):
+                        self.kick_state = "kicking"
+                        self.kickerModule.status = "kick"
+                        self.pubKickerModule.publish(self.kickerModule)
+                        self.kick_start_time = time.time()
+                        self.get_logger().info("Kick bola!")
+
+                    # Setelah kick selesai (0.5 detik), masuk cooldown
+                    elif self.kick_state == "kicking":
+                        elapsed = time.time() - self.kick_start_time
+                        if elapsed >= KICK_TIME:
+                            self.kick_state = "cooldown"
+                            self.kickerModule.status = "cooldown"
+                            self.pubKickerModule.publish(self.kickerModule)
+                            self.kick_start_time = time.time()
+                            self.subProses += 1  # langsung lanjut ke titik berikutnya
+                            self.get_logger().info("Masuk cooldown, lanjut ke koordinat berikutnya")
+
+            elif self.subProses == 1:
+                x, y = 160, 130
+                self.controlOutputGoToCoordinate(x, y)
+                self.get_logger().info(f"Menuju Koordinat B: x={x}, y={y}")
+
+                elapsed = time.time() - self.kick_start_time
+                if self.kick_state == "cooldown" and elapsed >= COOLDOWN_TIME:
+                    self.kick_state = "idle"
+                    self.get_logger().info("Cooldown selesai, siap kick lagi")
+                    
+                # Saat mulai ke titik B, mulai charge
+                if self.kick_state == "idle":
+                    self.kick_state = "charging"
+                    self.kickerModule.status = "charging"
+                    self.pubKickerModule.publish(self.kickerModule)
+                    self.kick_start_time = time.time()
+                    self.get_logger().info("Mulai charging sambil bergerak")
+
+                elif elapsed >= CHARGE_TIME:
+                    self.kick_state = "waiting"
+                    self.kickerModule.status = "waiting"
+                    self.pubKickerModule.publish(self.kickerModule)
+
+                # Cek sudah sampai titik B dan charge selesai
+                if -self.batas <= self.errorX <= self.batas and -self.batas <= self.errorY <= self.batas:
+                    elapsed = time.time() - self.kick_start_time
+                    
+                    self.get_logger().info("Sudah sampai koordinat B")
+                    if elapsed >= CHARGE_TIME and (self.kick_state == "charging" or self.kick_state == "waiting"):
+                        self.kick()
+                        self.kick_state = "kicking"
+                        self.kickerModule.status = "kick"
+                        self.pubKickerModule.publish(self.kickerModule)
+                        self.kick_start_time = time.time()
+                        self.get_logger().info("Kick bola!")
+
+                    # Setelah kick selesai, langsung cooldown dan lanjut lagi
+                    elif self.kick_state == "kicking":
+                        elapsed = time.time() - self.kick_start_time
+                        if elapsed >= KICK_TIME:
+                            self.kick_state = "cooldown"
+                            self.kickerModule.status = "cooldown"
+                            self.pubKickerModule.publish(self.kickerModule)
+                            self.kick_start_time = time.time()
+                            self.subProses += 1  # langsung lanjut
+                            self.get_logger().info("Masuk cooldown, lanjut ke koordinat berikutnya")
+
+            # ---- Skenario selesai
+            else:
+                self.get_logger().info("Skenario selesai ✅")
+
+
+    def scenario2(self):
+        CHARGE_TIME = 5.0
+        KICK_TIME = 0.5
+        COOLDOWN_TIME = 5.0
+        
+        if not hasattr(self, "kick_state"):
+            self.kick_state = "idle"
+            self.kick_start_time = time.time()
+
+        self.get_logger().info(self.kick_state)
+        self.get_logger().info(f"Flag: {self.flag}")
+
+
+        elapsed = time.time() - self.kick_start_time
+        if self.kick_state == "cooldown" and elapsed >= COOLDOWN_TIME:
+            self.kick_state = "idle"
+            self.get_logger().info("Cooldown selesai, siap kick lagi")
+
+        if self.kick_state == "idle":
+            self.kick_state = "charging"
+            self.kickerModule.status = "charging"
+            self.pubKickerModule.publish(self.kickerModule)
+            self.kick_start_time = time.time()
+            self.get_logger().info("Mulai charging sambil bergerak")
+
+        elif elapsed >= CHARGE_TIME:
+            self.kick_state = "waiting"
+            self.kickerModule.status = "waiting"
+            self.pubKickerModule.publish(self.kickerModule)
+
+        if self.flag == 0:
+            if self.subProses == 0:
+                x, y = 0, 130
+                self.controlOutputGoToCoordinate(x, y)
+                self.get_logger().info(f"Menuju Koordinat: x={x}, y={y}")
+                if -self.batas <= self.errorX <= self.batas and -self.batas <= self.errorY <= self.batas:
+                    self.get_logger().info("Sudah sampai koordinat")
+                    self.subProses += 1
+            elif self.subProses == 1:
+                x, y = 160, 130
+                self.controlOutputGoToCoordinate(x, y)
+                self.get_logger().info(f"Menuju Koordinat: x={x}, y={y}")
+                if -self.batas <= self.errorX <= self.batas and -self.batas <= self.errorY <= self.batas:
+                    self.get_logger().info("Sudah sampai koordinat")
+                    self.subProses += 1
+            elif self.subProses == 2:
+                state = self.catchBall("catchBall")
+                self.get_logger().info(f"Menuju Bola")
+                if state == True:
+                    self.catchBall("scenario2")
+                    self.subProses = 0
+                    self.flag += 1
+
+        elif self.flag == 1:
+            x, y = 160, 130
+            self.controlOutputGoToCoordinate(x, y)
+            self.get_logger().info(f"Menghadap Depan")
+            if -self.batas <= self.errorX <= self.batas and -self.batas <= self.errorY <= self.batas:
+                if elapsed >= CHARGE_TIME and (self.kick_state == "charging" or self.kick_state == "waiting"):
+                    self.kick_state = "kicking"
+                    self.kickerModule.status = "kick"
+                    self.pubKickerModule.publish(self.kickerModule)
+                    self.kick_start_time = time.time()
+                    self.get_logger().info("Kick bola!")
+
+                # Setelah kick selesai (0.5 detik), masuk cooldown
+                elif self.kick_state == "kicking":
+                    elapsed = time.time() - self.kick_start_time
+                    if elapsed >= KICK_TIME:
+                        self.kick_state = "cooldown"
+                        self.kickerModule.status = "cooldown"
+                        self.pubKickerModule.publish(self.kickerModule)
+                        self.kick_start_time = time.time()
+                        self.flag += 1 # langsung lanjut ke titik berikutnya
+                        self.get_logger().info("Masuk cooldown, lanjut ke koordinat berikutnya")
+        
+        elif self.flag == 2:
+            if self.subProses == 0:
+                x, y = 0, 130
+                self.controlOutputGoToCoordinate(x, y)
+                self.get_logger().info(f"Menuju Koordinat: x={x}, y={y}")
+                if -self.batas <= self.errorX <= self.batas and -self.batas <= self.errorY <= self.batas:
+                    self.get_logger().info("Sudah sampai koordinat")
+                    self.subProses += 1
+            elif self.subProses == 1:
+                x, y = 160, 130
+                self.controlOutputGoToCoordinate(x, y)
+                self.get_logger().info(f"Menuju Koordinat: x={x}, y={y}")
+                if -self.batas <= self.errorX <= self.batas and -self.batas <= self.errorY <= self.batas:
+                    self.get_logger().info("Sudah sampai koordinat")
+                    self.subProses += 1
+            elif self.subProses == 2:
+                state = self.catchBall("catchBall")
+                self.get_logger().info(f"Menuju Bola")
+                if state == True:
+                    self.catchBall("scenario2")
+                    self.subProses = 0
+                    self.flag += 1
+
+        elif self.flag == 3:
+            x, y = 160, 130
+            self.controlOutputGoToCoordinate(x, y)
+            self.get_logger().info(f"Menghadap Depan")
+            if -self.batas <= self.errorX <= self.batas and -self.batas <= self.errorY <= self.batas:
+                if elapsed >= CHARGE_TIME and (self.kick_state == "charging" or self.kick_state == "waiting"):
+                    self.kick_state = "kicking"
+                    self.kickerModule.status = "kick"
+                    self.pubKickerModule.publish(self.kickerModule)
+                    self.kick_start_time = time.time()
+                    self.get_logger().info("Kick bola!")
+
+                # Setelah kick selesai (0.5 detik), masuk cooldown
+                elif self.kick_state == "kicking":
+                    elapsed = time.time() - self.kick_start_time
+                    if elapsed >= KICK_TIME:
+                        self.kick_state = "cooldown"
+                        self.kickerModule.status = "cooldown"
+                        self.pubKickerModule.publish(self.kickerModule)
+                        self.kick_start_time = time.time()
+                        self.flag += 1 # langsung lanjut ke titik berikutnya
+                        self.get_logger().info("Masuk cooldown, lanjut ke koordinat berikutnya")
+        
+        else:
+            self.get_logger().info("Skenario selesai ✅")
+            self.robotMode = "nothing"
+
     def robotAction(self):
         if self.robotMode == "nothing":
             if self.robotActionStatus:
@@ -661,13 +899,13 @@ class RobotMovementAutoNode(Node):
                 self.robotMode = 'nothing'
 
         if self.robotMode == "catchBall":
-            state = self.catchBall()
+            state = self.catchBall("catchBall")
             if state:
                 self.robotMode = "nothing"
                 self.sendPID = False
 
         if self.robotMode == "catchBall2":
-            state = self.catchBall2()
+            state = self.catchBall2("catchBall2")
             if state:
                 self.robotMode = "nothing"
                 self.sendPID = False
@@ -677,6 +915,14 @@ class RobotMovementAutoNode(Node):
 
         if self.robotMode == "shooting":
             self.shooting()
+
+        if self.robotMode == "scenario1": # Scenario without Kicker
+            self.scenario1()
+
+        if self.robotMode == "scenario2": # Scenario with Kicker
+            self.scenario2()
+
+        
 
 
 def main(args=None):
